@@ -13,10 +13,10 @@ use mlir_sys::{
     MlirGreedySimplifyRegionLevel_MLIR_GREEDY_SIMPLIFY_REGION_LEVEL_AGGRESSIVE,
     MlirGreedySimplifyRegionLevel_MLIR_GREEDY_SIMPLIFY_REGION_LEVEL_DISABLED,
     MlirGreedySimplifyRegionLevel_MLIR_GREEDY_SIMPLIFY_REGION_LEVEL_NORMAL,
-    mlirApplyPatternsAndFoldGreedily, mlirGreedyRewriteDriverConfigCreate,
-    mlirGreedyRewriteDriverConfigDestroy, mlirGreedyRewriteDriverConfigEnableConstantCSE,
-    mlirGreedyRewriteDriverConfigEnableFolding, mlirGreedyRewriteDriverConfigGetMaxIterations,
-    mlirGreedyRewriteDriverConfigGetMaxNumRewrites,
+    mlirApplyPatternsAndFoldGreedily, mlirApplyPatternsAndFoldGreedilyWithOp,
+    mlirGreedyRewriteDriverConfigCreate, mlirGreedyRewriteDriverConfigDestroy,
+    mlirGreedyRewriteDriverConfigEnableConstantCSE, mlirGreedyRewriteDriverConfigEnableFolding,
+    mlirGreedyRewriteDriverConfigGetMaxIterations, mlirGreedyRewriteDriverConfigGetMaxNumRewrites,
     mlirGreedyRewriteDriverConfigGetRegionSimplificationLevel,
     mlirGreedyRewriteDriverConfigGetStrictness,
     mlirGreedyRewriteDriverConfigGetUseTopDownTraversal,
@@ -32,10 +32,10 @@ use mlir_sys::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
 pub enum GreedyRewriteStrictness {
-    AnyOp = MlirGreedyRewriteStrictness_MLIR_GREEDY_REWRITE_STRICTNESS_ANY_OP,
+    AnyOp = MlirGreedyRewriteStrictness_MLIR_GREEDY_REWRITE_STRICTNESS_ANY_OP as _,
     ExistingAndNewOps =
-        MlirGreedyRewriteStrictness_MLIR_GREEDY_REWRITE_STRICTNESS_EXISTING_AND_NEW_OPS,
-    ExistingOps = MlirGreedyRewriteStrictness_MLIR_GREEDY_REWRITE_STRICTNESS_EXISTING_OPS,
+        MlirGreedyRewriteStrictness_MLIR_GREEDY_REWRITE_STRICTNESS_EXISTING_AND_NEW_OPS as _,
+    ExistingOps = MlirGreedyRewriteStrictness_MLIR_GREEDY_REWRITE_STRICTNESS_EXISTING_OPS as _,
 }
 
 impl GreedyRewriteStrictness {
@@ -61,9 +61,9 @@ impl GreedyRewriteStrictness {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
 pub enum GreedySimplifyRegionLevel {
-    Disabled = MlirGreedySimplifyRegionLevel_MLIR_GREEDY_SIMPLIFY_REGION_LEVEL_DISABLED,
-    Normal = MlirGreedySimplifyRegionLevel_MLIR_GREEDY_SIMPLIFY_REGION_LEVEL_NORMAL,
-    Aggressive = MlirGreedySimplifyRegionLevel_MLIR_GREEDY_SIMPLIFY_REGION_LEVEL_AGGRESSIVE,
+    Disabled = MlirGreedySimplifyRegionLevel_MLIR_GREEDY_SIMPLIFY_REGION_LEVEL_DISABLED as _,
+    Normal = MlirGreedySimplifyRegionLevel_MLIR_GREEDY_SIMPLIFY_REGION_LEVEL_NORMAL as _,
+    Aggressive = MlirGreedySimplifyRegionLevel_MLIR_GREEDY_SIMPLIFY_REGION_LEVEL_AGGRESSIVE as _,
 }
 
 impl GreedySimplifyRegionLevel {
@@ -220,6 +220,26 @@ pub fn apply_patterns_and_fold_greedily(
     }
 }
 
+/// Applies patterns and folds greedily to the given operation.
+///
+/// The `patterns` argument is consumed (its ownership is transferred to the C
+/// layer).
+pub fn apply_patterns_and_fold_greedily_with_op(
+    op: OperationRef,
+    patterns: FrozenRewritePatternSet,
+    config: &GreedyRewriteDriverConfig,
+) -> Result<(), Error> {
+    let result = LogicalResult::from_raw(unsafe {
+        mlirApplyPatternsAndFoldGreedilyWithOp(op.to_raw(), patterns.into_raw(), config.to_raw())
+    });
+
+    if result.is_success() {
+        Ok(())
+    } else {
+        Err(Error::ApplyPatterns)
+    }
+}
+
 /// Walks the operation and applies patterns using a fast walk-based driver.
 ///
 /// The `patterns` argument is consumed.
@@ -333,5 +353,19 @@ mod tests {
         let config = GreedyRewriteDriverConfig::new();
 
         assert!(apply_patterns_and_fold_greedily(&module, frozen, &config).is_ok());
+    }
+
+    #[test]
+    fn apply_frozen_patterns_with_op() {
+        let context = create_test_context();
+        let module = Module::new(Location::unknown(&context));
+        let patterns = RewritePatternSet::new(&context);
+        let frozen = patterns.freeze();
+        let config = GreedyRewriteDriverConfig::new();
+
+        assert!(
+            apply_patterns_and_fold_greedily_with_op(module.as_operation(), frozen, &config)
+                .is_ok()
+        );
     }
 }
