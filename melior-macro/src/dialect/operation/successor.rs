@@ -1,0 +1,88 @@
+use super::{FieldKind, OperationField};
+use crate::dialect::{
+    error::Error,
+    utility::{generate_iterator_type, generate_result_type, sanitize_snake_case_identifier},
+};
+use proc_macro2::TokenStream;
+use quote::quote;
+use syn::{Ident, Type, parse_quote};
+
+#[derive(Debug)]
+pub struct Successor<'a> {
+    name: &'a str,
+    singular_identifier: Ident,
+    variadic: bool,
+    index: usize,
+}
+
+impl<'a> Successor<'a> {
+    pub fn new(name: &'a str, variadic: bool, index: usize) -> Result<Self, Error> {
+        Ok(Self {
+            name,
+            singular_identifier: sanitize_snake_case_identifier(name)?,
+            variadic,
+            index,
+        })
+    }
+
+    pub const fn is_variadic(&self) -> bool {
+        self.variadic
+    }
+}
+
+impl OperationField for Successor<'_> {
+    fn name(&self) -> &str {
+        self.name
+    }
+
+    fn kind(&self) -> FieldKind {
+        FieldKind::Successor
+    }
+
+    fn index(&self) -> usize {
+        self.index
+    }
+
+    fn singular_identifier(&self) -> &Ident {
+        &self.singular_identifier
+    }
+
+    fn parameter_type(&self) -> Type {
+        let r#type: Type = parse_quote!(&::melior::ir::Block<'c>);
+
+        if self.is_variadic() {
+            parse_quote!(&[#r#type])
+        } else {
+            r#type
+        }
+    }
+
+    fn return_type(&self) -> Type {
+        let r#type: Type = parse_quote!(::melior::ir::BlockRef<'c, '_>);
+
+        if self.is_variadic() {
+            generate_iterator_type(r#type)
+        } else {
+            generate_result_type(r#type)
+        }
+    }
+
+    fn is_optional(&self) -> bool {
+        false
+    }
+
+    fn add_arguments(&self) -> TokenStream {
+        let name = &self.singular_identifier;
+
+        if self.is_variadic() {
+            quote! { #name }
+        } else {
+            quote! { &[#name] }
+        }
+    }
+
+    // MLIR has no segment size attribute for successors.
+    fn segment(&self) -> Option<usize> {
+        None
+    }
+}

@@ -2,6 +2,7 @@
   "words": [
     "addf",
     "addi",
+    "addressof",
     "alloca",
     "amdgpu",
     "andi",
@@ -9,7 +10,9 @@
     "bufferizable",
     "bufferization",
     "bufferize",
+    "callees",
     "canonicalizer",
+    "clippy",
     "cmpi",
     "codegen",
     "commonmark",
@@ -46,6 +49,7 @@
     "mlir",
     "mulf",
     "muli",
+    "mxint",
     "nhwc",
     "nvgpu",
     "nvvm",
@@ -70,6 +74,9 @@
     "tblgen",
     "tosa",
     "trunci",
+    "uninlined",
+    "unranked",
+    "worklist",
     "xindex",
     "xori"
   ]

@@ -1,0 +1,127 @@
+use crate::dialect::operation::{OperationElement, OperationField, VariadicKind};
+use convert_case::{Case, Casing};
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote};
+
+pub fn generate_element_accessor(field: &OperationElement, length: usize) -> TokenStream {
+    let kind = field.kind();
+    let singular_kind_identifier = format_ident!("{}", kind.singular_name());
+    let plural_kind_identifier = format_ident!("{}", kind.plural_name());
+    let count = format_ident!("{}_count", kind.singular_name());
+    let error_variant = format_ident!("{}NotFound", kind.singular_name().to_case(Case::Pascal));
+    let name = field.name();
+    let position = field.position();
+    let index = position.index();
+
+    let body = match position.variadic_kind() {
+        None => {
+            if field.is_optional() {
+                // Optional element, and some singular elements.
+                // Only present if the amount of groups is at least the number of
+                // elements.
+                quote! {
+                    if self.operation.#count() < #length {
+                        Err(::melior::Error::#error_variant(#name))
+                    } else {
+                        self.operation.#singular_kind_identifier(#index)
+                    }
+                }
+            } else if field.is_variadic() {
+                // A unfixed group
+                // Length computed by subtracting the amount of other
+                // singular elements from the number of elements.
+                quote! {
+                    let group_length = self.operation.#count() + 1 - #length;
+                    self.operation.#plural_kind_identifier().skip(#index).take(group_length)
+                }
+            } else if position.preceding_unfixed_count() > 0 {
+                // Single element after unfixed group
+                // Compute the length of that variable group and take the next element
+                quote! {
+                    let group_length = self.operation.#count() + 1 - #length;
+                    self.operation.#singular_kind_identifier(#index + group_length - 1)
+                }
+            } else {
+                // All elements so far are singular
+                quote! {
+                    self.operation.#singular_kind_identifier(#index)
+                }
+            }
+        }
+        Some(VariadicKind::SameSize) => {
+            let unfixed_count = position.unfixed_count();
+            let fixed_count = length - unfixed_count;
+            let preceding_unfixed_count = position.preceding_unfixed_count();
+            let preceding_fixed_count = index - preceding_unfixed_count;
+            let get_elements = if field.is_unfixed() {
+                quote! {
+                    self.operation.#plural_kind_identifier().skip(start).take(group_len)
+                }
+            } else {
+                quote! {
+                    self.operation.#singular_kind_identifier(start)
+                }
+            };
+
+            quote! {
+                let total_var_len = self.operation.#count() - #fixed_count;
+                let group_len = total_var_len / #unfixed_count;
+                let start = #preceding_fixed_count + #preceding_unfixed_count * group_len;
+
+                #get_elements
+            }
+        }
+        Some(VariadicKind::AttributeSized) => {
+            let segment_size_attribute = kind.segment_size_attribute_name();
+            let get_elements = if !field.is_unfixed() {
+                quote! {
+                    self.operation.#singular_kind_identifier(start)
+                }
+            } else if field.is_optional() {
+                quote! {
+                    if group_len == 0 {
+                        Err(::melior::Error::#error_variant(#name))
+                    } else {
+                        self.operation.#singular_kind_identifier(start)
+                    }
+                }
+            } else {
+                quote! {
+                    Ok(self.operation.#plural_kind_identifier().skip(start).take(group_len))
+                }
+            };
+
+            quote! {
+                let attribute =
+                    ::melior::ir::attribute::DenseI32ArrayAttribute::<'c>::try_from(
+                        self.operation
+                        .attribute(#segment_size_attribute)?
+                    )?;
+                let start = (0..#index)
+                    .map(|index| attribute.element(index))
+                    .sum::<Result<i32, _>>()? as usize;
+                let group_len = attribute.element(#index)? as usize;
+
+                #get_elements
+            }
+        }
+    };
+
+    let identifier = field.singular_identifier();
+    let return_type = field.return_type();
+    let doc = format!(
+        "Returns the `{name}` {}.",
+        if field.is_variadic() {
+            kind.plural_name()
+        } else {
+            kind.singular_name()
+        }
+    );
+
+    quote! {
+        #[doc = #doc]
+        pub fn #identifier(&self) -> #return_type {
+            #body
+        }
+    }
+}

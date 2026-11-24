@@ -1,0 +1,112 @@
+//! Internal macros for Melior.
+
+mod check;
+mod dialect;
+mod operation;
+mod parse;
+mod pass;
+mod utility;
+
+use dialect::DialectInput;
+use parse::{IdentifierList, IdentifierSet};
+use proc_macro::TokenStream;
+use proc_macro2::Ident;
+use syn::{LitStr, parse_macro_input};
+
+/// Generates a dialect module from a TableGen file.
+///
+/// # Examples
+///
+/// ```rust
+/// melior::dialect! {
+///     name: "func",
+///     files: ["IR/FuncOps.td", "TransformOps/FuncTransformOps.td", "Transforms/Passes.td"],
+///     include_directories: ["mlir/Dialect/Func"],
+///     include_directory_env_vars: ["ENV_VAR_FOR_MLIR_DIALECT_DIR"],
+/// }
+/// ```
+#[proc_macro]
+pub fn dialect(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DialectInput);
+    dialect::generate_dialect(input).unwrap_or_else(|error| error.to_compile_error())
+}
+
+/// Generates functions creating binary operations in a dialect.
+#[proc_macro]
+pub fn binary_operations(stream: TokenStream) -> TokenStream {
+    let set = parse_macro_input!(stream as IdentifierSet<Ident>);
+
+    operation::generate_binary(set.head(), set.identifiers())
+}
+
+/// Generates functions creating unary operations in a dialect.
+#[proc_macro]
+pub fn unary_operations(stream: TokenStream) -> TokenStream {
+    let set = parse_macro_input!(stream as IdentifierSet<Ident>);
+
+    operation::generate_unary(set.head(), set.identifiers())
+}
+
+/// Generates functions creating unary operations with result types in a dialect.
+#[proc_macro]
+pub fn typed_unary_operations(stream: TokenStream) -> TokenStream {
+    let set = parse_macro_input!(stream as IdentifierSet<Ident>);
+
+    operation::generate_typed_unary(set.head(), set.identifiers())
+}
+
+/// Generates functions checking kinds of types.
+#[proc_macro]
+pub fn type_check_functions(stream: TokenStream) -> TokenStream {
+    let identifiers = parse_macro_input!(stream as IdentifierList);
+
+    convert_result(check::generate(
+        identifiers.identifiers(),
+        "mlirTypeIsA",
+        "a type",
+    ))
+}
+
+/// Generates functions checking kinds of attributes.
+#[proc_macro]
+pub fn attribute_check_functions(stream: TokenStream) -> TokenStream {
+    let identifiers = parse_macro_input!(stream as IdentifierList);
+
+    convert_result(check::generate(
+        identifiers.identifiers(),
+        "mlirAttributeIsA",
+        "an attribute",
+    ))
+}
+
+/// Generates functions creating and registering conversion passes.
+#[proc_macro]
+pub fn conversion_passes(stream: TokenStream) -> TokenStream {
+    let identifiers = parse_macro_input!(stream as IdentifierList);
+
+    convert_result(pass::generate(
+        identifiers.identifiers(),
+        "Conversion",
+        |mut name| {
+            name = name.strip_prefix("Convert").unwrap_or(name);
+            name = name.strip_suffix("ConversionPass").unwrap_or(name);
+            name.strip_suffix("Pass").unwrap_or(name).into()
+        },
+    ))
+}
+
+/// Generates functions creating and registering passes in a dialect.
+#[proc_macro]
+pub fn passes(stream: TokenStream) -> TokenStream {
+    let set = parse_macro_input!(stream as IdentifierSet<LitStr>);
+
+    convert_result(pass::generate(
+        set.identifiers(),
+        &set.head().value(),
+        |name| name.into(),
+    ))
+}
+
+fn convert_result(result: syn::Result<TokenStream>) -> TokenStream {
+    result.unwrap_or_else(|error| error.to_compile_error().into())
+}

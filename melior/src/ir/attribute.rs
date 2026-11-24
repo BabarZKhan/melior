@@ -25,20 +25,21 @@ pub use self::{
     strided_layout::StridedLayoutAttribute, string::StringAttribute, r#type::TypeAttribute,
 };
 use crate::{context::Context, string_ref::StringRef, utility::print_callback};
+use core::{
+    ffi::c_void,
+    fmt::{self, Debug, Display, Formatter},
+    marker::PhantomData,
+};
 use distinct::DistinctAttribute;
 use mlir_sys::{
     MlirAttribute, mlirAttributeEqual, mlirAttributeGetNull, mlirAttributeParseGet,
     mlirAttributePrint, mlirUnitAttrGet,
 };
-use std::{
-    ffi::c_void,
-    fmt::{self, Debug, Display, Formatter},
-    marker::PhantomData,
-};
 
 /// An attribute.
 // Attributes are always values but their internal storage is owned by contexts.
 #[derive(Clone, Copy)]
+#[repr(transparent)]
 pub struct Attribute<'c> {
     raw: MlirAttribute,
     _context: PhantomData<&'c Context>,
@@ -46,6 +47,10 @@ pub struct Attribute<'c> {
 
 impl<'c> Attribute<'c> {
     /// Parses an attribute.
+    ///
+    /// On malformed sources, the MLIR parser can read memory out of bounds or
+    /// crash, and so can uses of the objects it creates. Untrusted sources must
+    /// not be parsed.
     pub fn parse(context: &'c Context, source: &str) -> Option<Self> {
         unsafe {
             Self::from_option_raw(mlirAttributeParseGet(
@@ -126,9 +131,9 @@ impl Debug for Attribute<'_> {
     }
 }
 
-impl std::hash::Hash for Attribute<'_> {
+impl core::hash::Hash for Attribute<'_> {
     // Hashes the attribute's pointer since they are unique w.r.t. the MLIR context.
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.raw.ptr.hash(state);
     }
 }

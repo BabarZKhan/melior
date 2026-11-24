@@ -1,0 +1,109 @@
+mod attribute_accessor;
+mod element_accessor;
+mod operation_builder;
+mod operation_enum;
+mod region_accessor;
+mod successor_accessor;
+mod type_state;
+
+pub use self::operation_enum::generate_operation_enum;
+use self::{
+    attribute_accessor::generate_attribute_accessors,
+    element_accessor::generate_element_accessor,
+    operation_builder::{
+        generate_default_constructor, generate_operation_builder, generate_operation_builder_fn,
+    },
+    region_accessor::generate_region_accessor,
+    successor_accessor::generate_successor_accessor,
+    type_state::TypeStateBuilder,
+};
+use super::operation::Operation;
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote};
+
+pub fn generate_operation(operation: &Operation) -> TokenStream {
+    let summary = operation.summary();
+    let description = operation.description();
+    let identifier = format_ident!("{}", operation.name());
+    let operation_name = operation.full_operation_name();
+
+    let result_accessors = operation
+        .results()
+        .map(|result| generate_element_accessor(result, operation.result_len()))
+        .collect::<Vec<_>>();
+    let operand_accessors = operation
+        .operands()
+        .map(|operand| generate_element_accessor(operand, operation.operand_len()))
+        .collect::<Vec<_>>();
+    let region_accessors = operation
+        .regions()
+        .map(generate_region_accessor)
+        .collect::<Vec<_>>();
+    let successor_accessors = operation
+        .successors()
+        .map(generate_successor_accessor)
+        .collect::<Vec<_>>();
+    let attribute_accessors = operation
+        .all_attributes()
+        .map(generate_attribute_accessors)
+        .collect::<Vec<_>>();
+
+    let builder = TypeStateBuilder::new(operation);
+    let builder_tokens = generate_operation_builder(&builder);
+    let builder_fn = generate_operation_builder_fn(&builder);
+    let default_constructor = generate_default_constructor(&builder);
+
+    quote! {
+        #[doc = #summary]
+        #[doc = "\n\n"]
+        #[doc = #description]
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub struct #identifier<'c> {
+            operation: ::melior::ir::operation::Operation<'c>,
+        }
+
+        impl<'c> #identifier<'c> {
+            /// Returns a name.
+            pub fn name() -> &'static str {
+                #operation_name
+            }
+
+            /// Returns a generic operation.
+            pub fn as_operation(&self) -> &::melior::ir::operation::Operation<'c> {
+                &self.operation
+            }
+
+            #builder_fn
+
+            #(#result_accessors)*
+            #(#operand_accessors)*
+            #(#region_accessors)*
+            #(#successor_accessors)*
+            #(#attribute_accessors)*
+        }
+
+        #builder_tokens
+
+        #default_constructor
+
+        impl<'c> TryFrom<::melior::ir::operation::Operation<'c>> for #identifier<'c> {
+            type Error = ::melior::ir::operation::Operation<'c>;
+
+            fn try_from(
+                operation: ::melior::ir::operation::Operation<'c>,
+                ) -> Result<Self, Self::Error> {
+                if operation.name().as_string_ref().as_str() == Ok(#operation_name) {
+                    Ok(Self { operation })
+                } else {
+                    Err(operation)
+                }
+            }
+        }
+
+        impl<'c> From<#identifier<'c>> for ::melior::ir::operation::Operation<'c> {
+            fn from(operation: #identifier<'c>) -> Self {
+                operation.operation
+            }
+        }
+    }
+}
